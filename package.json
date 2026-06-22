@@ -1,0 +1,13 @@
+{
+  "name": "@dougbots/opencode-image-loader",
+  "version": "0.1.0",
+  "description": "Image-to-base64 tool for opencode — lets image-capable models see local image files",
+  "keywords": ["opencode-plugin", "image", "base64"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sdougbrown/opencode-image-loader.git"
+  },
+  "main": "index.ts",
+  "type": "module"
+}
