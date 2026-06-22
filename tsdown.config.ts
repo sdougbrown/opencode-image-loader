@@ -8,8 +8,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   platform: "node",
-  external: [
-    "@opencode-ai/plugin",
-    "@opencode-ai/plugin/tool",
-  ],
+  fixedExtension: false,
 });
