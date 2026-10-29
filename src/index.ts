@@ -1,4 +1,5 @@
-import type { Plugin } from "@opencode-ai/plugin";
+import type { Plugin as V1Plugin } from "@opencode-ai/plugin";
+import { Plugin } from "@opencode/plugin";
 import { readFile, stat } from "fs/promises";
 import { extname, resolve } from "path";
 import { tool } from "@opencode-ai/plugin/tool";
@@ -48,9 +49,11 @@ const imageTool = tool({
       const dataUrl = `data:${mimeType};base64,${base64}`;
 
       ctx.metadata({
-        mimeType,
-        fileSize: stats.size,
-        path: absolutePath,
+        metadata: {
+          mimeType,
+          fileSize: stats.size,
+          path: absolutePath,
+        },
       });
 
       return {
@@ -71,8 +74,93 @@ const imageTool = tool({
   },
 });
 
-export const ImageLoaderPlugin: Plugin = async () => ({
+type ToolResultLike = {
+  output: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
+  attachments?: Array<{ type: string; mime: string; url: string; filename?: string }>;
+};
+
+type V2ToolResult = {
+  content: string | Array<{ type: "text"; text: string } | { type: "file"; uri: string; mime: string; name?: string }>;
+  metadata?: Record<string, unknown>;
+};
+
+/** Project the V1 tool result shape onto the V2 Tool.Result shape. */
+export function toV2ToolResult(result: string | ToolResultLike): V2ToolResult {
+  if (typeof result === "string") return { content: result };
+  const content: NonNullable<V2ToolResult["content"]> = result.attachments?.length
+    ? [
+        { type: "text", text: result.output },
+        ...result.attachments.map((attachment) => ({
+          type: "file" as const,
+          uri: attachment.url,
+          mime: attachment.mime,
+          ...(attachment.filename ? { name: attachment.filename } : {}),
+        })),
+      ]
+    : result.output;
+  return {
+    content,
+    metadata: {
+      ...(result.metadata ?? {}),
+      ...(result.title ? { title: result.title } : {}),
+    },
+  };
+}
+
+export const ImageLoaderPlugin: V1Plugin = async () => ({
   tool: {
     image_to_base64: imageTool,
   },
 });
+
+/**
+ * The OpenCode 2 setup. Registers the same tool through the V2 tool transform;
+ * the V1 tool context lacks `directory`, so the plugin location supplies it.
+ */
+export async function setupImageLoader(ctx: Plugin.Context): Promise<() => void> {
+  const directory = ctx.location.directory;
+
+  await ctx.tool.transform((editor) => {
+    editor.add({
+      name: "image_to_base64",
+      description: imageTool.description,
+      input: tool.schema.toJSONSchema(tool.schema.object(imageTool.args)),
+      execute: async (rawInput, context) => {
+        const input = rawInput as { filePath: string };
+        const result = await imageTool.execute(input, {
+          sessionID: context.sessionID,
+          agent: context.agent,
+          messageID: context.messageID,
+          directory,
+          worktree: directory,
+          abort: context.signal,
+          metadata: (update) => {
+            void context.progress(update);
+          },
+          ask: () => {
+            throw new Error("permission prompts are not supported in OpenCode 2 tool context");
+          },
+        });
+        return toV2ToolResult(result);
+      },
+    });
+  });
+
+  return () => {};
+}
+
+/**
+ * One entrypoint for both OpenCode generations: V2 reads `id` and `setup()`,
+ * V1 (1.18.29+) calls `server()`.
+ */
+export default {
+  ...Plugin.define({
+    id: "image-loader",
+    setup: setupImageLoader,
+  }),
+  async server(ctx: Parameters<typeof ImageLoaderPlugin>[0]) {
+    return ImageLoaderPlugin(ctx);
+  },
+};
