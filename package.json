@@ -1,15 +1,21 @@
 {
   "name": "@dougbots/opencode-image-loader",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Image-to-base64 tool for opencode — lets image-capable models see local image files",
-  "keywords": ["opencode-plugin", "image", "base64"],
+  "keywords": [
+    "opencode-plugin",
+    "image",
+    "base64"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sdougbrown/opencode-image-loader.git"
   },
   "type": "module",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -27,6 +33,14 @@
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.15.4",
     "@opencode/plugin": "^2.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    },
+    "@opencode/plugin": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.15.4",
