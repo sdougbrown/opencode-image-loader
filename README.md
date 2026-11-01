@@ -48,4 +48,7 @@ The tool returns:
 
 ## Dependencies
 
-- **@opencode-ai/plugin** — the opencode plugin runtime
+Neither peer is installed with the package: opencode supplies them to plugins at runtime.
+
+- **@opencode-ai/plugin** — the OpenCode 1 plugin runtime and `tool()` helper
+- **@opencode/plugin** — the OpenCode 2 plugin API, loaded only when the host provides it

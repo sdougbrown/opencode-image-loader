@@ -1,5 +1,5 @@
 import type { Plugin as V1Plugin } from "@opencode-ai/plugin";
-import { Plugin } from "@opencode/plugin";
+import type { Plugin } from "@opencode/plugin";
 import { readFile, stat } from "fs/promises";
 import { extname, resolve } from "path";
 import { tool } from "@opencode-ai/plugin/tool";
@@ -151,15 +151,36 @@ export async function setupImageLoader(ctx: Plugin.Context): Promise<() => void>
   return () => {};
 }
 
+function isMissingV2Package(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const code = "code" in error ? error.code : undefined;
+  if (code !== "MODULE_NOT_FOUND" && code !== "ERR_MODULE_NOT_FOUND") return false;
+  const message = "message" in error ? String(error.message) : "";
+  return message.includes("@opencode/plugin");
+}
+
+/**
+ * `@opencode/plugin` only exists on OpenCode 2 hosts, so the V2 definition is
+ * contributed when that package resolves and skipped otherwise.
+ */
+async function v2Definition(): Promise<Partial<Plugin.Plugin>> {
+  try {
+    const { Plugin: v2 } = await import("@opencode/plugin");
+    return v2.define({ id: "image-loader", setup: setupImageLoader });
+  } catch (error) {
+    if (!isMissingV2Package(error)) throw error;
+    return {};
+  }
+}
+
 /**
  * One entrypoint for both OpenCode generations: V2 reads `id` and `setup()`,
  * V1 (1.18.29+) calls `server()`.
  */
+const v2 = await v2Definition();
+
 export default {
-  ...Plugin.define({
-    id: "image-loader",
-    setup: setupImageLoader,
-  }),
+  ...v2,
   async server(ctx: Parameters<typeof ImageLoaderPlugin>[0]) {
     return ImageLoaderPlugin(ctx);
   },
