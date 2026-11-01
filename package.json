@@ -1,6 +1,6 @@
 {
   "name": "@dougbots/opencode-image-loader",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Image-to-base64 tool for opencode — lets image-capable models see local image files",
   "keywords": [
     "opencode-plugin",

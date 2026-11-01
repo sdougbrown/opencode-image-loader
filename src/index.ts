@@ -2,7 +2,10 @@ import type { Plugin as V1Plugin } from "@opencode-ai/plugin";
 import type { Plugin } from "@opencode/plugin";
 import { readFile, stat } from "fs/promises";
 import { extname, resolve } from "path";
-import { tool } from "@opencode-ai/plugin/tool";
+
+const DESCRIPTION =
+  "Loads an image file from disk and converts it to a base64 data URL. Use this when you need to 'see' an image file provided by the user.";
+const FILE_PATH_DESCRIPTION = "The absolute or relative path to the image file.";
 
 const SUPPORTED: Record<string, string> = {
   ".png": "image/png",
@@ -16,64 +19,6 @@ const SUPPORTED: Record<string, string> = {
   ".tif": "image/tiff",
 };
 
-const imageTool = tool({
-  description:
-    "Loads an image file from disk and converts it to a base64 data URL. Use this when you need to 'see' an image file provided by the user.",
-  args: {
-    filePath: tool.schema
-      .string()
-      .describe("The absolute or relative path to the image file."),
-  },
-  async execute({ filePath }, ctx) {
-    try {
-      const absolutePath = resolve(ctx.directory, filePath);
-      const stats = await stat(absolutePath);
-
-      if (!stats.isFile()) {
-        return {
-          output: `Error: '${filePath}' is not a file.`,
-        };
-      }
-
-      const buffer = await readFile(absolutePath);
-      const ext = extname(absolutePath).toLowerCase();
-      const mimeType = SUPPORTED[ext] || "application/octet-stream";
-
-      if (!SUPPORTED[ext]) {
-        return {
-          output: `Error: Unsupported image extension '${ext}'. Supported: ${Object.keys(SUPPORTED).join(", ")}`,
-        };
-      }
-
-      const base64 = buffer.toString("base64");
-      const dataUrl = `data:${mimeType};base64,${base64}`;
-
-      ctx.metadata({
-        metadata: {
-          mimeType,
-          fileSize: stats.size,
-          path: absolutePath,
-        },
-      });
-
-      return {
-        output: `Successfully converted '${filePath}' to base64.`,
-        attachments: [
-          {
-            type: "file",
-            mime: mimeType,
-            url: dataUrl,
-            filename: absolutePath.split("/").pop(),
-          },
-        ],
-      };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { output: `Error loading image: ${message}` };
-    }
-  },
-});
-
 type ToolResultLike = {
   output: string;
   title?: string;
@@ -85,6 +30,64 @@ type V2ToolResult = {
   content: string | Array<{ type: "text"; text: string } | { type: "file"; uri: string; mime: string; name?: string }>;
   metadata?: Record<string, unknown>;
 };
+
+/** The parts of a tool context this tool reads, so both generations can supply one. */
+type ExecuteContext = {
+  readonly directory: string;
+  metadata(input: { title?: string; metadata?: Record<string, unknown> }): void;
+};
+
+async function imageToBase64(
+  { filePath }: { filePath: string },
+  ctx: ExecuteContext,
+): Promise<ToolResultLike> {
+  try {
+    const absolutePath = resolve(ctx.directory, filePath);
+    const stats = await stat(absolutePath);
+
+    if (!stats.isFile()) {
+      return {
+        output: `Error: '${filePath}' is not a file.`,
+      };
+    }
+
+    const buffer = await readFile(absolutePath);
+    const ext = extname(absolutePath).toLowerCase();
+    const mimeType = SUPPORTED[ext] || "application/octet-stream";
+
+    if (!SUPPORTED[ext]) {
+      return {
+        output: `Error: Unsupported image extension '${ext}'. Supported: ${Object.keys(SUPPORTED).join(", ")}`,
+      };
+    }
+
+    const base64 = buffer.toString("base64");
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+
+    ctx.metadata({
+      metadata: {
+        mimeType,
+        fileSize: stats.size,
+        path: absolutePath,
+      },
+    });
+
+    return {
+      output: `Successfully converted '${filePath}' to base64.`,
+      attachments: [
+        {
+          type: "file",
+          mime: mimeType,
+          url: dataUrl,
+          filename: absolutePath.split("/").pop(),
+        },
+      ],
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { output: `Error loading image: ${message}` };
+  }
+}
 
 /** Project the V1 tool result shape onto the V2 Tool.Result shape. */
 export function toV2ToolResult(result: string | ToolResultLike): V2ToolResult {
@@ -109,11 +112,24 @@ export function toV2ToolResult(result: string | ToolResultLike): V2ToolResult {
   };
 }
 
-export const ImageLoaderPlugin: V1Plugin = async () => ({
-  tool: {
-    image_to_base64: imageTool,
-  },
-});
+/**
+ * The OpenCode 1 setup. `@opencode-ai/plugin` is only installed on OpenCode 1
+ * hosts, so it is loaded here rather than at module scope.
+ */
+export const ImageLoaderPlugin: V1Plugin = async () => {
+  const { tool } = await import("@opencode-ai/plugin/tool");
+  return {
+    tool: {
+      image_to_base64: tool({
+        description: DESCRIPTION,
+        args: {
+          filePath: tool.schema.string().describe(FILE_PATH_DESCRIPTION),
+        },
+        execute: (input, context) => imageToBase64(input, context),
+      }),
+    },
+  };
+};
 
 /**
  * The OpenCode 2 setup. Registers the same tool through the V2 tool transform;
@@ -125,22 +141,20 @@ export async function setupImageLoader(ctx: Plugin.Context): Promise<() => void>
   await ctx.tool.transform((editor) => {
     editor.add({
       name: "image_to_base64",
-      description: imageTool.description,
-      input: tool.schema.toJSONSchema(tool.schema.object(imageTool.args)),
+      description: DESCRIPTION,
+      input: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: FILE_PATH_DESCRIPTION },
+        },
+        required: ["filePath"],
+        additionalProperties: false,
+      },
       execute: async (rawInput, context) => {
-        const input = rawInput as { filePath: string };
-        const result = await imageTool.execute(input, {
-          sessionID: context.sessionID,
-          agent: context.agent,
-          messageID: context.messageID,
+        const result = await imageToBase64(rawInput as { filePath: string }, {
           directory,
-          worktree: directory,
-          abort: context.signal,
           metadata: (update) => {
-            void context.progress(update);
-          },
-          ask: () => {
-            throw new Error("permission prompts are not supported in OpenCode 2 tool context");
+            void context.progress(update.metadata ?? {});
           },
         });
         return toV2ToolResult(result);
